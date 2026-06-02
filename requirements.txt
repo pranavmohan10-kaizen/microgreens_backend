@@ -1,0 +1,26 @@
+# requirements.txt — Microgreens Python Backend v2.0
+# ====================================================
+# Install everything:   pip install -r requirements.txt
+# Headless server only: swap opencv-python for opencv-python-headless below
+
+# ── Core HTTP client ──────────────────────────────────────────────────────────
+requests>=2.31.0
+
+# ── Numerical computing ───────────────────────────────────────────────────────
+numpy>=1.24.0
+
+# ── Computer vision ───────────────────────────────────────────────────────────
+opencv-python>=4.8.0             # Full build (includes GUI — use on desktop/laptop)
+# opencv-python-headless>=4.8.0  # No GUI — use this on Raspberry Pi / Linux server
+
+# ── Tabular ML (scikit-learn pipeline) ───────────────────────────────────────
+scikit-learn>=1.3.0
+joblib>=1.3.0                    # Model serialisation (joblib.dump / joblib.load)
+
+# ── Deep learning / vision model (uncomment when VisionModel.ENABLED = True) ─
+# tensorflow>=2.13.0             # Full TF (CPU or GPU)
+# keras>=2.13.0                  # Bundled with TF 2.x; only needed for standalone Keras
+
+# ── Optional: data analysis helpers ──────────────────────────────────────────
+# pandas>=2.0.0                  # Useful for loading/inspecting the CSV training logs
+# matplotlib>=3.7.0              # Plotting sensor trends during development
