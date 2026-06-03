@@ -46,10 +46,11 @@ class SensorReading:
 
     # Metadata
     device_status:    Optional[str]   = None   # freeform string from ESP32
-    manual_override:  bool            = False  # True = operator has control
+    manual_override:  bool            = False  # True = operator has control (Pump/Fan)
+    light_override:   bool            = False  # True = operator has control (Lights)
     uptime_seconds:   Optional[int]   = None   # ESP32 uptime in seconds
-
     def is_usable(self) -> bool:
+
         """
         Return True only when the three core sensor values are present
         and within physically plausible ranges. main.py calls this before
@@ -120,7 +121,7 @@ class BlynkClient:
         """
         reading = SensorReading()
 
-        # Map config pin keys → SensorReading field names + type coercion
+       # Map config pin keys → SensorReading field names + type coercion
         pin_map = {
             "temperature":    ("temperature_c",     float),
             "humidity":       ("humidity_pct",      float),
@@ -128,8 +129,9 @@ class BlynkClient:
             "uptime_seconds": ("uptime_seconds",    int),
             "device_status":  ("device_status",     str),
             "manual_override":("manual_override",   lambda v: bool(int(float(v)))),
+            "light_override": ("light_override",    lambda v: bool(int(float(v)))),
         }
-
+    
         for pin_key, (attr_name, coerce) in pin_map.items():
             raw = self._read_pin(config.VP[pin_key])
             if raw is not None:
@@ -153,46 +155,33 @@ class BlynkClient:
         return reading
 
     def push_commands(self, decisions: dict) -> bool:
-        """
-        Write actuator decisions back to Blynk virtual pins.
-
-        Args:
-            decisions: dict output from ml_model.run_inference(), e.g.
-                       {"pump_on": True, "fan_on": False, "lights_on": True}
-
-        Returns:
-            True if ALL writes succeeded, False if any failed.
-
-        The method respects BLYNK_WRITE_COOLDOWN_SEC between writes to avoid
-        hitting Blynk's free-tier rate limit (~1 request/second).
-        """
-        # Map decision keys → config virtual pin keys
-        write_plan = [
-            ("pump_on",   "pump_command",  decisions.get("pump_on",   False)),
-            ("fan_on",    "fan_command",   decisions.get("fan_on",    False)),
-            ("lights_on", "light_command", decisions.get("lights_on", False)),
-        ]
+        """Writes actuator decisions to Blynk. Skips any keys removed by overrides."""
+        mapping = {
+            "pump_on":   "pump_command",
+            "fan_on":    "fan_command",
+            "lights_on": "light_command",
+        }
 
         all_ok = True
-        for decision_key, pin_key, state in write_plan:
-            value  = 1 if state else 0
-            pin    = config.VP[pin_key]
-            ok     = self._write_pin(pin, value)
-            if not ok:
-                logger.error(
-                    "[BlynkClient] Failed to write %s=%d to %s.",
-                    decision_key, value, pin,
-                )
-                all_ok = False
-            time.sleep(self._write_cooldown)   # respect rate limit
+        pushed_actions = []
 
-        if all_ok:
-            logger.info(
-                "[BlynkClient] Commands pushed → pump=%s  fan=%s  lights=%s",
-                "ON" if decisions.get("pump_on")   else "OFF",
-                "ON" if decisions.get("fan_on")    else "OFF",
-                "ON" if decisions.get("lights_on") else "OFF",
-            )
+        for decision_key, pin_key in mapping.items():
+            # Only push to hardware if the AI is still allowed to control it!
+            if decision_key in decisions:
+                state = decisions[decision_key]
+                value = 1 if state else 0
+                pin   = config.VP[pin_key]
+                
+                if not self._write_pin(pin, value):
+                    logger.error("[BlynkClient] Failed to write %s=%d to %s.", decision_key, value, pin)
+                    all_ok = False
+                else:
+                    pushed_actions.append(f"{decision_key.split('_')[0]}={'ON' if state else 'OFF'}")
+                
+                time.sleep(self._write_cooldown)
+
+        if all_ok and pushed_actions:
+            logger.info("[BlynkClient] Commands pushed → %s", "  ".join(pushed_actions))
         return all_ok
 
     def is_reachable(self) -> bool:

@@ -199,14 +199,6 @@ def run_cycle(
         logger.warning("[Cycle] Sensor data unusable — skipping cycle.")
         return
 
-    # ── STEP 2: CHECK manual override ────────────────────────────────────────
-    if sensor_reading.manual_override:
-        logger.info(
-            "[Cycle] Manual override is ACTIVE — "
-            "Python backend will not push any commands this cycle."
-        )
-        return   # Do NOT touch actuators while a human operator has control
-
     # ── STEP 3: FETCH image frame from ESP32-CAM ──────────────────────────────
     frame          = None
     image_features = {}
@@ -229,14 +221,45 @@ def run_cycle(
     # ── STEP 4: INFER — run ML / rule engine ─────────────────────────────────
     decisions: dict = controller.run_inference(sensor_reading, image_features, frame)
 
+    # ── STEP 4.1: EXTREME HEAT SAFETY (The Swamp Cooler) ─────────────────────
+    if getattr(sensor_reading, 'temperature_c', 0) and sensor_reading.temperature_c >= 32.0:
+        # Only trigger safety override if the human operator hasn't taken manual control
+        if not getattr(sensor_reading, 'manual_override', False):
+            logger.warning("[Safety] Extreme heat (>32°C)! Triggering Swamp Cooler.")
+            
+            # 1. Turn Fan and Misters ON
+            blynk.push_commands({"fan_on": True, "pump_on": True})
+            
+            # 2. Wait exactly 3 seconds for the mist to fill the tray
+            import time
+            time.sleep(3)
+            
+            # 3. Turn Misters OFF (Fan stays on to blow the cool air)
+            blynk.push_commands({"pump_on": False})
+            
+            # 4. Tell the AI to keep the fan on, but leave the pump off so it doesn't flood
+            decisions["fan_on"] = True
+            decisions["pump_on"] = False
+
+    # ── STEP 4.5: APPLY MANUAL OVERRIDES ─────────────────────────────────────
+    if getattr(sensor_reading, 'manual_override', False):
+        logger.info("[Override] Pump/Fan override active. Removing from AI control.")
+        decisions.pop("pump_on", None)
+        decisions.pop("fan_on", None)
+
+    if getattr(sensor_reading, 'light_override', False):
+        logger.info("[Override] Light override active. Removing from AI control.")
+        decisions.pop("lights_on", None)
+
+    # Log what the AI actually decided (using safe .get() since overrides might remove keys)
     logger.info(
         "[Cycle] Decision → pump=%-3s  fan=%-3s  lights=%-3s  "
         "source=%-10s  confidence=%.2f",
-        "ON"  if decisions["pump_on"]   else "OFF",
-        "ON"  if decisions["fan_on"]    else "OFF",
-        "ON"  if decisions["lights_on"] else "OFF",
-        decisions["source"],
-        decisions["confidence"],
+        "ON"  if decisions.get("pump_on", False)   else "OFF",
+        "ON"  if decisions.get("fan_on", False)    else "OFF",
+        "ON"  if decisions.get("lights_on", False) else "OFF",
+        decisions.get("source", "unknown"),
+        decisions.get("confidence", 0.0),
     )
 
     # ── STEP 5: PUSH commands to Blynk ───────────────────────────────────────
