@@ -1,3 +1,93 @@
-/data
-/logs
-/__pycache__
+# ─────────────────────────────────────────────────────────────────────────────
+# Secrets & local configuration — NEVER commit real credentials
+# ─────────────────────────────────────────────────────────────────────────────
+config.py
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing / coverage / type-checking caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Machine Learning artifacts
+# ─────────────────────────────────────────────────────────────────────────────
+# Trained model binaries are usually too large / environment-specific for git.
+# Track them with Git LFS or a model registry instead if you need versioning.
+*.pkl
+*.joblib
+*.keras
+*.h5
+*.hdf5
+*.pt
+*.pth
+*.onnx
+*.tflite
+models/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IoT / runtime data — sensor logs, captured frames, application logs
+# ─────────────────────────────────────────────────────────────────────────────
+/logs/
+*.log
+/data/
+*.csv
+/images/
+*.jpg
+*.jpeg
+*.png
+!docs/**/*.png
+!docs/**/*.jpg
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Editors / OS cruft
+# ─────────────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

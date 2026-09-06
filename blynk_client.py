@@ -49,12 +49,14 @@ class SensorReading:
     manual_override:  bool            = False  # True = operator has control (Pump/Fan)
     light_override:   bool            = False  # True = operator has control (Lights)
     uptime_seconds:   Optional[int]   = None   # ESP32 uptime in seconds
-    def is_usable(self) -> bool:
 
-        """
-        Return True only when the three core sensor values are present
-        and within physically plausible ranges. main.py calls this before
-        passing the reading to the ML model.
+    def is_usable(self) -> bool:
+        """Check whether the core sensor values are present and plausible.
+
+        Returns:
+            True only when temperature, humidity, and soil moisture are all
+            present and within physically plausible ranges. ``main.py`` calls
+            this before passing the reading to the ML model.
         """
         return (
             self.temperature_c    is not None and -40 <= self.temperature_c <= 85
@@ -90,7 +92,7 @@ class BlynkClient:
         timeout: int     = config.HTTP_REQUEST_TIMEOUT_SEC,
         write_cooldown: float = config.BLYNK_WRITE_COOLDOWN_SEC,
     ):
-        if auth_token == "YOUR_BLYNK_AUTH_TOKEN_HERE":
+        if auth_token == "YOUR_BLYNK_TOKEN_HERE":
             logger.warning(
                 "[BlynkClient] Auth token is still the placeholder value. "
                 "Update BLYNK_AUTH_TOKEN in config.py before running."

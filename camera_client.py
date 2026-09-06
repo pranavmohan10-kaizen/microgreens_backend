@@ -63,10 +63,11 @@ class CameraClient:
         image_save_dir: str = config.IMAGE_SAVE_DIR,
         save_images: bool = True,
     ):
-        if "192.168.X.XXX" in snapshot_url:
+        if "YOUR_ESP32_CAM_IP_HERE" in snapshot_url:
             logger.warning(
                 "[CameraClient] ESP32_CAM_IP is still the placeholder value. "
-                "Update it in config.py once your partner boots the ESP32-CAM."
+                "Update it in config.py (or the ESP32_CAM_IP env var) once "
+                "the ESP32-CAM has booted."
             )
 
         self._url       = snapshot_url

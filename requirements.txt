@@ -6,6 +6,9 @@
 # ── Core HTTP client ──────────────────────────────────────────────────────────
 requests>=2.31.0
 
+# ── Secret management ─────────────────────────────────────────────────────────
+python-dotenv>=1.0.0             # Loads BLYNK_AUTH_TOKEN / ESP32_CAM_IP from .env
+
 # ── Numerical computing ───────────────────────────────────────────────────────
 numpy>=1.24.0
 

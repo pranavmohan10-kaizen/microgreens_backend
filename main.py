@@ -1,38 +1,41 @@
-"""
-main.py — Microgreens Backend Service Entry Point
-==================================================
+"""main.py — Microgreens Backend Service Entry Point.
+
 This is the process you start on your server, Raspberry Pi, or any
 machine with Python 3.10+ and network access to both Blynk Cloud and
 the ESP32-CAM's local IP.
 
-BACKGROUND SERVICE LOOP
-  Every MAIN_LOOP_INTERVAL_SEC seconds:
-    1. FETCH   — read sensor data from Blynk REST API
-    2. FETCH   — capture image frame from ESP32-CAM
-    3. INFER   — pass data to FusionController → get decision dict
-    4. PUSH    — write actuator commands back to Blynk
-    5. LOG     — append sensor + decision rows to CSV
+Background service loop:
+    Every ``MAIN_LOOP_INTERVAL_SEC`` seconds:
+        1. FETCH — read sensor data from the Blynk REST API.
+        2. FETCH — capture an image frame from the ESP32-CAM.
+        3. INFER — pass data to ``FusionController`` to get a decision dict.
+        4. PUSH — write actuator commands back to Blynk.
+        5. LOG — append sensor + decision rows to CSV.
 
-MANUAL OVERRIDE SAFETY
-  If the ESP32 signals manual_override=True (e.g., the physical operator
-  has taken control via the Blynk dashboard), the Python backend skips
-  the PUSH step entirely — it will never fight a human operator.
+Manual override safety:
+    If the ESP32 signals ``manual_override=True`` (e.g. the physical
+    operator has taken control via the Blynk dashboard), the Python
+    backend skips the PUSH step entirely — it will never fight a human
+    operator.
 
-HOW TO RUN
-  # Install dependencies first:
-  pip install -r requirements.txt
+How to run:
+    Install dependencies first::
 
-  # Start the service:
-  python main.py
+        pip install -r requirements.txt
 
-  # To run as a persistent daemon on Linux (systemd):
-  sudo cp microgreens.service /etc/systemd/system/
-  sudo systemctl enable --now microgreens
+    Start the service::
 
-ENVIRONMENT VARIABLES (optional, override config.py values)
-  BLYNK_AUTH_TOKEN   — override BLYNK_AUTH_TOKEN from environment
-  ESP32_CAM_IP       — override ESP32_CAM_IP from environment
-  LOG_LEVEL          — override LOG_LEVEL  (e.g., LOG_LEVEL=DEBUG python main.py)
+        python main.py
+
+    To run as a persistent daemon on Linux (systemd)::
+
+        sudo cp microgreens.service /etc/systemd/system/
+        sudo systemctl enable --now microgreens
+
+Environment variables (optional, override config.py values):
+    BLYNK_AUTH_TOKEN: Override ``BLYNK_AUTH_TOKEN`` from the environment.
+    ESP32_CAM_IP: Override ``ESP32_CAM_IP`` from the environment.
+    LOG_LEVEL: Override ``LOG_LEVEL`` (e.g. ``LOG_LEVEL=DEBUG python main.py``).
 """
 
 import csv
@@ -43,6 +46,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from types import FrameType
 from typing import Optional
 
 import config
@@ -58,7 +62,7 @@ if os.environ.get("BLYNK_AUTH_TOKEN"):
     config.BLYNK_AUTH_TOKEN = os.environ["BLYNK_AUTH_TOKEN"]
 
 if os.environ.get("ESP32_CAM_IP"):
-    config.ESP32_CAM_IP        = os.environ["ESP32_CAM_IP"]
+    config.ESP32_CAM_IP = os.environ["ESP32_CAM_IP"]
     config.ESP32_CAM_SNAPSHOT_URL = (
         f"http://{config.ESP32_CAM_IP}:{config.ESP32_CAM_PORT}/capture"
     )
@@ -83,15 +87,14 @@ logging.basicConfig(
 logger = logging.getLogger("main")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CSV data loggers  (builds your training dataset over time)
+# CSV data loggers (builds your training dataset over time)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SENSOR_CSV_HEADERS = [
     "timestamp_utc", "temperature_c", "humidity_pct", "soil_moisture_pct",
     "manual_override", "uptime_seconds", "device_status",
-    "img_green_ratio", "img_veg_ratio", "img_sharpness"
+    "img_green_ratio", "img_veg_ratio", "img_sharpness",
 ]
-
 
 _DECISION_CSV_HEADERS = [
     "timestamp_utc", "pump_on", "fan_on", "lights_on",
@@ -99,9 +102,15 @@ _DECISION_CSV_HEADERS = [
 ]
 
 
-def _append_csv(filepath: str, headers: list, row: list) -> None:
-    """Write one row to a CSV file. Creates the file with a header if new."""
-    path   = Path(filepath)
+def _append_csv(filepath: str, headers: list[str], row: list) -> None:
+    """Write one row to a CSV file, creating it with a header if new.
+
+    Args:
+        filepath: Path to the target CSV file.
+        headers: Column headers to write if the file does not yet exist.
+        row: The data row to append.
+    """
+    path = Path(filepath)
     is_new = not path.exists() or path.stat().st_size == 0
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", newline="", encoding="utf-8") as f:
@@ -111,22 +120,29 @@ def _append_csv(filepath: str, headers: list, row: list) -> None:
         writer.writerow(row)
 
 
-def log_sensor(reading: SensorReading, image_features: dict = None) -> None:
+def log_sensor(reading: SensorReading, image_features: Optional[dict] = None) -> None:
+    """Append one sensor snapshot (plus optional image features) to the CSV log.
+
+    Args:
+        reading: The sensor snapshot returned by ``BlynkClient.fetch_sensors()``.
+        image_features: Optional dict of scalar image features from
+            ``CameraClient.extract_features()``. Defaults to an empty dict.
+    """
     if image_features is None:
         image_features = {}
-        
+
     ts = datetime.utcfromtimestamp(reading.timestamp).isoformat(timespec="seconds")
     _append_csv(
         config.SENSOR_LOG_CSV,
         _SENSOR_CSV_HEADERS,
         [
             ts,
-            round(reading.temperature_c     or 0.0, 2),
-            round(reading.humidity_pct      or 0.0, 2),
+            round(reading.temperature_c or 0.0, 2),
+            round(reading.humidity_pct or 0.0, 2),
             round(reading.soil_moisture_pct or 0.0, 2),
             int(reading.manual_override),
             reading.uptime_seconds or -1,
-            reading.device_status  or "",
+            reading.device_status or "",
             round(image_features.get("green_ratio", 0.0), 4),
             round(image_features.get("veg_ratio", 0.0), 4),
             round(image_features.get("sharpness", 0.0), 2),
@@ -135,11 +151,18 @@ def log_sensor(reading: SensorReading, image_features: dict = None) -> None:
 
 
 def log_decision(decisions: dict) -> None:
+    """Append one actuator decision to the decision CSV log.
+
+    Args:
+        decisions: Decision dict as produced by
+            ``FusionController.run_inference()`` (after safety overrides).
+    """
     from ml_model import encode_label
-    ts    = datetime.utcnow().isoformat(timespec="seconds")
+
+    ts = datetime.utcnow().isoformat(timespec="seconds")
     label = encode_label(
-        decisions.get("pump_on",   False),
-        decisions.get("fan_on",    False),
+        decisions.get("pump_on", False),
+        decisions.get("fan_on", False),
         decisions.get("lights_on", False),
     )
     _append_csv(
@@ -147,10 +170,10 @@ def log_decision(decisions: dict) -> None:
         _DECISION_CSV_HEADERS,
         [
             ts,
-            int(decisions.get("pump_on",    False)),
-            int(decisions.get("fan_on",     False)),
-            int(decisions.get("lights_on",  False)),
-            decisions.get("source",     "unknown"),
+            int(decisions.get("pump_on", False)),
+            int(decisions.get("fan_on", False)),
+            int(decisions.get("lights_on", False)),
+            decisions.get("source", "unknown"),
             round(decisions.get("confidence", 0.0), 4),
             label,
         ],
@@ -163,13 +186,19 @@ def log_decision(decisions: dict) -> None:
 _keep_running: bool = True
 
 
-def _on_shutdown(signum: int, _frame) -> None:
+def _on_shutdown(signum: int, _frame: Optional[FrameType]) -> None:
+    """Signal handler that requests a clean stop of the main loop.
+
+    Args:
+        signum: The received signal number (SIGINT or SIGTERM).
+        _frame: The current stack frame (unused).
+    """
     global _keep_running
     logger.info("[Main] Shutdown signal (%d) received — finishing current cycle.", signum)
     _keep_running = False
 
 
-signal.signal(signal.SIGINT,  _on_shutdown)
+signal.signal(signal.SIGINT, _on_shutdown)
 signal.signal(signal.SIGTERM, _on_shutdown)
 
 
@@ -178,21 +207,27 @@ signal.signal(signal.SIGTERM, _on_shutdown)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_cycle(
-    blynk:      BlynkClient,
-    camera:     CameraClient,
+    blynk: BlynkClient,
+    camera: CameraClient,
     controller: FusionController,
-    cycle_num:  int,
+    cycle_num: int,
 ) -> None:
-    """
-    One complete sense → think → act iteration.
+    """Run one complete sense -> think -> act iteration.
 
-    Failures inside a cycle are caught and logged — the service never
-    crashes due to a single bad network call or inference error.
+    Failures inside a cycle are caught by the caller and logged — the
+    service never crashes due to a single bad network call or inference
+    error.
+
+    Args:
+        blynk: Client used to fetch sensor readings and push actuator commands.
+        camera: Client used to fetch and analyze ESP32-CAM frames.
+        controller: Fusion controller that turns sensor/vision data into decisions.
+        cycle_num: 1-indexed counter of the current loop iteration, for logging.
     """
     logger.info("━━━  Cycle #%04d  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", cycle_num)
 
     # ── STEP 1: FETCH sensor data from Blynk ─────────────────────────────────
-    sensor_reading: SensorReading = blynk.fetch_sensors()
+    sensor_reading = blynk.fetch_sensors()
     log_sensor(sensor_reading)
 
     if not sensor_reading.is_usable():
@@ -200,8 +235,8 @@ def run_cycle(
         return
 
     # ── STEP 3: FETCH image frame from ESP32-CAM ──────────────────────────────
-    frame          = None
-    image_features = {}
+    frame = None
+    image_features: dict = {}
 
     if camera.is_reachable():
         frame = camera.fetch_frame()
@@ -210,8 +245,8 @@ def run_cycle(
             logger.info(
                 "[Cycle] Image features — green=%.3f  veg=%.3f  sharp=%.1f",
                 image_features.get("green_ratio", 0),
-                image_features.get("veg_ratio",   0),
-                image_features.get("sharpness",   0),
+                image_features.get("veg_ratio", 0),
+                image_features.get("sharpness", 0),
             )
         else:
             logger.warning("[Cycle] Frame capture failed — proceeding without image.")
@@ -222,49 +257,46 @@ def run_cycle(
     decisions: dict = controller.run_inference(sensor_reading, image_features, frame)
 
     # ── STEP 4.1: EXTREME HEAT SAFETY (The Swamp Cooler) ─────────────────────
-    if getattr(sensor_reading, 'temperature_c', 0) and sensor_reading.temperature_c >= 32.0:
-        # Only trigger safety override if the human operator hasn't taken manual control
-        if not getattr(sensor_reading, 'manual_override', False):
+    if getattr(sensor_reading, "temperature_c", 0) and sensor_reading.temperature_c >= 32.0:
+        if not getattr(sensor_reading, "manual_override", False):
             logger.warning("[Safety] Extreme heat (>32°C)! Triggering Swamp Cooler.")
-            
-            # 1. Turn Fan and Misters ON
             blynk.push_commands({"fan_on": True, "pump_on": True})
-            
-            # 2. Wait exactly 3 seconds for the mist to fill the tray
-            import time
             time.sleep(3)
-            
-            # 3. Turn Misters OFF (Fan stays on to blow the cool air)
             blynk.push_commands({"pump_on": False})
-            
-            # 4. Tell the AI to keep the fan on, but leave the pump off so it doesn't flood
             decisions["fan_on"] = True
             decisions["pump_on"] = False
 
+    # ── STEP 4.2: OVERWATERING FAILSAFE (The AI Guardrail) ───────────────────
+    # If the AI decides to water the plants, but the soil percentage is already
+    # comfortably wet (between 60% and 100%), we VETO the AI to prevent drowning.
+    moisture = getattr(sensor_reading, "soil_moisture_pct", 0)
+    if 60.0 <= moisture <= 100.0:
+        if decisions.get("pump_on") is True:
+            logger.info("[Safety] Soil is very wet (%.1f%%). Vetoing AI pump decision.", moisture)
+            decisions["pump_on"] = False
+
     # ── STEP 4.5: APPLY MANUAL OVERRIDES ─────────────────────────────────────
-    if getattr(sensor_reading, 'manual_override', False):
+    if getattr(sensor_reading, "manual_override", False):
         logger.info("[Override] Pump/Fan override active. Removing from AI control.")
         decisions.pop("pump_on", None)
         decisions.pop("fan_on", None)
 
-    if getattr(sensor_reading, 'light_override', False):
+    if getattr(sensor_reading, "light_override", False):
         logger.info("[Override] Light override active. Removing from AI control.")
         decisions.pop("lights_on", None)
 
     # Log what the AI actually decided (using safe .get() since overrides might remove keys)
     logger.info(
-        "[Cycle] Decision → pump=%-3s  fan=%-3s  lights=%-3s  "
-        "source=%-10s  confidence=%.2f",
-        "ON"  if decisions.get("pump_on", False)   else "OFF",
-        "ON"  if decisions.get("fan_on", False)    else "OFF",
-        "ON"  if decisions.get("lights_on", False) else "OFF",
+        "[Cycle] Decision → pump=%-3s  fan=%-3s  lights=%-3s  source=%-10s  confidence=%.2f",
+        "ON" if decisions.get("pump_on", False) else "OFF",
+        "ON" if decisions.get("fan_on", False) else "OFF",
+        "ON" if decisions.get("lights_on", False) else "OFF",
         decisions.get("source", "unknown"),
         decisions.get("confidence", 0.0),
     )
 
     # ── STEP 5: PUSH commands to Blynk ───────────────────────────────────────
     success = blynk.push_commands(decisions)
-
     if success:
         log_decision(decisions)
         logger.info("[Cycle] ✓ Commands delivered to Blynk.")
@@ -277,7 +309,12 @@ def run_cycle(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def startup_checks(blynk: BlynkClient, camera: CameraClient) -> None:
-    """Warn early about connectivity issues. Does NOT block startup."""
+    """Warn early about connectivity issues. Does not block startup.
+
+    Args:
+        blynk: Client used to check Blynk cloud connectivity.
+        camera: Client used to check ESP32-CAM connectivity.
+    """
     logger.info("[Startup] Checking Blynk connectivity...")
     if blynk.is_reachable():
         logger.info("[Startup] ✓ Blynk cloud reachable.")
@@ -303,6 +340,7 @@ def startup_checks(blynk: BlynkClient, camera: CameraClient) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    """Start the Microgreens backend service and run its main loop forever."""
     logger.info("╔══════════════════════════════════════════════════╗")
     logger.info("║   Microgreens Backend Service  v2.0.0            ║")
     logger.info("║   Cycle interval : %3ds                          ║", config.MAIN_LOOP_INTERVAL_SEC)
@@ -310,8 +348,8 @@ def main() -> None:
     logger.info("╚══════════════════════════════════════════════════╝")
 
     # ── Instantiate clients and controller ───────────────────────────────────
-    blynk      = BlynkClient()
-    camera     = CameraClient()
+    blynk = BlynkClient()
+    camera = CameraClient()
     controller = FusionController()
 
     # ── Run startup connectivity checks ──────────────────────────────────────
@@ -325,7 +363,7 @@ def main() -> None:
 
     while _keep_running:
         cycle_start = time.monotonic()
-        cycle_num  += 1
+        cycle_num += 1
 
         try:
             run_cycle(blynk, camera, controller, cycle_num)
@@ -337,7 +375,7 @@ def main() -> None:
             )
 
         # ── Sleep for the remainder of the configured interval ────────────────
-        elapsed    = time.monotonic() - cycle_start
+        elapsed = time.monotonic() - cycle_start
         sleep_time = max(0.0, config.MAIN_LOOP_INTERVAL_SEC - elapsed)
 
         logger.debug(
